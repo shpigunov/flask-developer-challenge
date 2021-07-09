@@ -9,7 +9,9 @@ endpoint to verify the server is up and responding and a search endpoint
 providing a search across all public Gists for a given Github account.
 """
 
+import re
 import requests
+from requests.exceptions import ConnectionError
 from flask import Flask, jsonify, request
 
 
@@ -38,9 +40,17 @@ def gists_for_user(username):
         the above URL for details of the expected structure.
     """
     gists_url = 'https://api.github.com/users/{username}/gists'.format(
-            username=username)
-    response = requests.get(gists_url)
+        username=username)
+
+    try:
+        response = requests.get(gists_url)
+    except ConnectionError:
+        return {"message": "Connection Error"}
+
     # BONUS: What failures could happen?
+    if not response.ok:
+        return {"message": "Invalid Response from Github"}
+
     # BONUS: Paging? How does this work for users with tons of gists?
 
     return response.json()
@@ -59,25 +69,58 @@ def search():
         indicating any failure conditions.
     """
     post_data = request.get_json()
-    # BONUS: Validate the arguments?
+    # DONE: Validate the arguments?
+    if not 'username' in post_data:
+        return jsonify({
+            "status":  "user_not_specified"
+        })
+
+    if not 'pattern' in post_data:
+        return jsonify({
+            "status":  "pattern_not_specified"
+        })
 
     username = post_data['username']
     pattern = post_data['pattern']
 
     result = {}
     gists = gists_for_user(username)
-    # BONUS: Handle invalid users?
+
+    # DONE: Handle invalid users?
+    if 'message' in gists:
+        if gists['message'] == 'Not Found':
+            return jsonify({
+                "status":  "user_not_found",
+            })
+        if gists['message'] == 'Connection Error':
+            return jsonify({
+                "status":  "github_connection_error",
+            })
+
+    gist_data = {}
+    matches = []
 
     for gist in gists:
-        # REQUIRED: Fetch each gist and check for the pattern
+        # DONE: Fetch each gist and check for the pattern
         # BONUS: What about huge gists?
         # BONUS: Can we cache results in a datastore/db?
-        pass
+
+        # All the file urls in the gist
+        for file in gist['files'].values():
+            raw_url = file['raw_url']
+            with requests.get(raw_url) as r:
+                if r.ok:
+                    re_matches = re.search(pattern, r.text)
+                    if re_matches:
+                        base, gist_id = gist['html_url'].rsplit('/', 1)
+                        matches.append(f'{base}/{username}/{gist_id}')
+                    else:
+                        pass
 
     result['status'] = 'success'
     result['username'] = username
     result['pattern'] = pattern
-    result['matches'] = []
+    result['matches'] = matches
 
     return jsonify(result)
 
